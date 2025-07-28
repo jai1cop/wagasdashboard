@@ -1,6 +1,21 @@
-import os, io, requests, zipfile, pandas as pd
+import os
+import io
+import requests
+import zipfile
+import pandas as pd
 from datetime import datetime, timedelta
 
+# Add try-except for robust data fetching
+def fetch_csv(key, force=False):
+    try:
+        fname = FILES[key]
+        fpath = os.path.join(CACHE_DIR, fname)
+        if force or not os.path.exists(fpath) or _stale(fpath):
+            fpath = _download(fname)
+        return pd.read_csv(fpath)
+    except Exception as e:
+        st.error(f"Error fetching {key}: {e}")
+        return pd.DataFrame()  # Return empty DataFrame as fallback
 GBB_BASE   = "https://nemweb.com.au/Reports/Current/GBB/"
 FILES = {
     "flows"      : "GasBBActualFlowStorageLast31.CSV",
