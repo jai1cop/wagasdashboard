@@ -57,8 +57,24 @@ def _stale(path):
     last_modified = datetime.utcfromtimestamp(os.path.getmtime(path))
     return (datetime.utcnow() - last_modified).days > 0
 
+    def fetch_csv(key, force=False):
+    try:
+        fname = FILES[key]
+        fpath = os.path.join(CACHE_DIR, fname)
+        if force or _stale(fpath):
+            fpath = _download(fname)
 
-def fetch_csv(key, force=False):
+        df = pd.read_csv(fpath)
+        
+        # DEBUG: Print what we actually got
+        print(f"[DEBUG] {key} file columns: {list(df.columns)}")
+        print(f"[DEBUG] {key} file shape: {df.shape}")
+        print(f"[DEBUG] {key} first few rows:\n{df.head()}")
+        
+        df.columns = df.columns.str.lower()
+        return df
+    # ... rest of function stays the same
+
     """
     Retrieve CSV data by key, downloading if missing, stale, or force-refresh requested.
     Columns will always be in lowercase for consistent handling.
