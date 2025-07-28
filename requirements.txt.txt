@@ -1,0 +1,8 @@
+streamlit>=1.34
+pandas>=2.2
+plotly>=5.21
+requests>=2.32
+datetime
+os
+io
+zipfile
