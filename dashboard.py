@@ -1,7 +1,13 @@
-import streamlit as st, plotly.express as px, pandas as pd
-from datetime import date
-import data_fetcher as dfc
+import streamlit as st
 
+# Add caching to prevent repeated data fetching
+@st.cache_data(ttl=3600)  # Cache for 1 hour
+def load_gas_data():
+    try:
+        return dfc.get_model()
+    except Exception as e:
+        st.error(f"Error loading data: {e}")
+        return pd.DataFrame(), pd.DataFrame()
 st.set_page_config("WA Gas Supply & Demand",layout="wide")
 
 # ---------- sidebar ----------
