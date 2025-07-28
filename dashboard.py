@@ -116,3 +116,14 @@ st.dataframe(
     }),
     use_container_width=True
 )
+# Add this right after your imports in dashboard.py
+import os
+st.sidebar.write("Debug: Files in data_cache folder:")
+cache_path = "data_cache"
+if os.path.exists(cache_path):
+    for file in os.listdir(cache_path):
+        file_path = os.path.join(cache_path, file)
+        size = os.path.getsize(file_path)
+        st.sidebar.write(f"- {file}: {size} bytes")
+else:
+    st.sidebar.write("No data_cache folder found")
