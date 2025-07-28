@@ -1,4 +1,19 @@
 import streamlit as st
+import plotly.express as px
+import pandas as pd
+from datetime import date
+
+# Robust import with error handling
+try:
+    import data_fetcher as dfc
+except ImportError as e:
+    st.error(f"Cannot import data_fetcher module: {e}")
+    st.error("Please ensure data_fetcher.py is in the same directory as dashboard.py")
+    st.stop()
+
+st.set_page_config("WA Gas Supply & Demand", layout="wide")
+
+# Rest of your dashboard code..
 
 # Add caching to prevent repeated data fetching
 @st.cache_data(ttl=3600)  # Cache for 1 hour
