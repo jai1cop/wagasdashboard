@@ -8,9 +8,9 @@ GBB_BASE = "https://nemweb.com.au/Reports/Current/GBB/"
 
 # CSV filenames for key datasets
 FILES = {
-    "flows": "GasBBActualFlowStorageLast31.CSV",             # Historical daily flows and storage
+    "flows": "GasBBActualFlowStorageLast31.CSV",              # Historical daily flows and storage
     "mto_future": "GasBBMediumTermCapacityOutlookFuture.csv",  # Medium-term capacity outlook (future)
-    "nameplate": "GasBBNameplateRatingCurrent.csv",           # Nameplate ratings of facilities
+    "nameplate": "GasBBNameplateRatingCurrent.csv",            # Nameplate ratings of facilities
 }
 
 # Local cache directory for downloads
@@ -61,16 +61,19 @@ def fetch_csv(key, force=False):
         fpath = os.path.join(CACHE_DIR, fname)
         if force or _stale(fpath):
             fpath = _download(fname)
-        return pd.read_csv(fpath)
+        df = pd.read_csv(fpath)
+        # Normalize column names to lowercase for consistent access
+        df.columns = df.columns.str.lower()
+        return df
     except Exception as e:
         print(f"[ERROR] Could not load data for '{key}': {e}")
         # Return empty DataFrame with appropriate columns to avoid downstream errors
         if key == "nameplate":
-            return pd.DataFrame(columns=["FacilityName", "FacilityType", "NamePlateRating"])
+            return pd.DataFrame(columns=["facilityname", "facilitytype", "nameplaterating"])
         if key == "mto_future":
-            return pd.DataFrame(columns=["FacilityName", "FacilityType", "GasDay", "Capacity"])
+            return pd.DataFrame(columns=["facilityname", "facilitytype", "gasday", "capacity"])
         if key == "flows":
-            return pd.DataFrame(columns=["GasDay", "ZoneType", "ZoneName", "Quantity"])
+            return pd.DataFrame(columns=["gasday", "zonetype", "zonename", "quantity"])
         return pd.DataFrame()
 
 def clean_nameplate(df):
@@ -80,11 +83,13 @@ def clean_nameplate(df):
     :param df: raw DataFrame from nameplate CSV
     :return: cleaned DataFrame with columns ["FacilityName", "TJ_Nameplate"]
     """
-    if df.empty:
+    required_cols = {"facilityname", "facilitytype", "nameplaterating"}
+    if not required_cols.issubset(set(df.columns)):
+        print(f"[WARNING] Missing columns in nameplate data: {required_cols - set(df.columns)}")
         return pd.DataFrame(columns=["FacilityName", "TJ_Nameplate"])
-    prod = df[df["FacilityType"] == "Production"].copy()
-    prod = prod[["FacilityName", "NamePlateRating"]]
-    prod.rename(columns={"NamePlateRating": "TJ_Nameplate"}, inplace=True)
+    prod = df[df["facilitytype"] == "production"].copy()
+    prod = prod[["facilityname", "nameplaterating"]]
+    prod.rename(columns={"facilityname": "FacilityName", "nameplaterating": "TJ_Nameplate"}, inplace=True)
     return prod
 
 def clean_mto(df):
@@ -94,14 +99,16 @@ def clean_mto(df):
     :param df: raw DataFrame from medium-term capacity outlook CSV
     :return: cleaned DataFrame with columns ["FacilityName", "GasDay", "TJ_Available"]
     """
-    if df.empty:
+    required_cols = {"facilityname", "facilitytype", "gasday", "capacity"}
+    if not required_cols.issubset(set(df.columns)):
+        print(f"[WARNING] Missing columns in medium-term capacity data: {required_cols - set(df.columns)}")
         return pd.DataFrame(columns=["FacilityName", "GasDay", "TJ_Available"])
-    df["GasDay"] = pd.to_datetime(df["GasDay"], errors='coerce')
-    prod = df[df["FacilityType"] == "Production"].copy()
-    prod = prod[["FacilityName", "GasDay", "Capacity"]]
-    prod.rename(columns={"Capacity": "TJ_Available"}, inplace=True)
-    # Remove rows with invalid dates
-    prod = prod.dropna(subset=["GasDay"])
+    
+    df["gasday"] = pd.to_datetime(df["gasday"], errors="coerce")
+    prod = df[df["facilitytype"] == "production"].copy()
+    prod = prod[["facilityname", "gasday", "capacity"]]
+    prod = prod.dropna(subset=["gasday"])
+    prod.rename(columns={"facilityname": "FacilityName", "gasday": "GasDay", "capacity": "TJ_Available"}, inplace=True)
     return prod
 
 def build_supply_profile():
@@ -127,13 +134,15 @@ def build_demand_profile():
     :return: DataFrame with GasDay and TJ_Demand columns
     """
     flows = fetch_csv("flows")
-    if flows.empty:
-        print("[WARNING] Empty flow data.")
+    required_cols = {"gasday", "zonetype", "zonename", "quantity"}
+    if not required_cols.issubset(set(flows.columns)):
+        print(f"[WARNING] Missing columns in flow data: {required_cols - set(flows.columns)}")
         return pd.DataFrame(columns=["GasDay", "TJ_Demand"])
-    flows["GasDay"] = pd.to_datetime(flows["GasDay"], errors='coerce')
-    demand_zone = flows[(flows["ZoneType"] == "Demand") & (flows["ZoneName"] == "Whole WA")]
-    demand = demand_zone.groupby("GasDay")["Quantity"].sum().reset_index()
-    demand = demand.rename(columns={"Quantity": "TJ_Demand"})
+    flows["gasday"] = pd.to_datetime(flows["gasday"], errors="coerce")
+    # Filter demand zones for whole WA
+    demand_zone = flows[(flows["zonetype"] == "demand") & (flows["zonename"] == "whole wa")]
+    demand = demand_zone.groupby("gasday")["quantity"].sum().reset_index()
+    demand.rename(columns={"gasday": "GasDay", "quantity": "TJ_Demand"}, inplace=True)
     demand = demand.dropna(subset=["GasDay"])
     return demand
 
