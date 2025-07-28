@@ -5,14 +5,17 @@ import zipfile
 import pandas as pd
 from datetime import datetime, timedelta
 
-# Constants defined at the top
+# Constants at the top
 GBB_BASE = "https://nemweb.com.au/Reports/Current/GBB/"
 FILES = {
     "flows": "GasBBActualFlowStorageLast31.CSV",
-    "mto_future": "GasBBMediumTermCapacityOutlookFuture.csv",
+    "mto_future": "GasBBMediumTermCapacityOutlookFuture.csv", 
     "nameplate": "GasBBNameplateRatingCurrent.csv",
 }
 
+# Main function at the bottom
+def get_model():
+    # ... function code ...
 CACHE_DIR = "data_cache"
 os.makedirs(CACHE_DIR, exist_ok=True)
 
