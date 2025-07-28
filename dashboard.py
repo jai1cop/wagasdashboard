@@ -25,6 +25,7 @@ def load_gas_data():
         return pd.DataFrame(), pd.DataFrame()
 st.set_page_config("WA Gas Supply & Demand",layout="wide")
 
+
 # ---------- sidebar ----------
 st.sidebar.header("Scenario Controls")
 
