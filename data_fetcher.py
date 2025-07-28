@@ -1,33 +1,28 @@
 import os
-import io
 import requests
-import zipfile
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 
-# Constants at the top
+# Constants
 GBB_BASE = "https://nemweb.com.au/Reports/Current/GBB/"
 FILES = {
     "flows": "GasBBActualFlowStorageLast31.CSV",
-    "mto_future": "GasBBMediumTermCapacityOutlookFuture.csv", 
+    "mto_future": "GasBBMediumTermCapacityOutlookFuture.csv",
     "nameplate": "GasBBNameplateRatingCurrent.csv",
 }
 
-# Main function at the bottom
-def get_model():
-    # ... function code ...
 CACHE_DIR = "data_cache"
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 def _download(fname):
-    """Download file from AEMO GBB with error handling"""
+    """Download file from AEMO GBB and save to cache dir"""
     try:
         url = GBB_BASE + fname
-        r = requests.get(url, timeout=40)
-        r.raise_for_status()
+        response = requests.get(url, timeout=40)
+        response.raise_for_status()
         path = os.path.join(CACHE_DIR, fname)
         with open(path, "wb") as f:
-            f.write(r.content)
+            f.write(response.content)
         return path
     except Exception as e:
         print(f"Error downloading {fname}: {e}")
@@ -35,22 +30,25 @@ def _download(fname):
 
 def _stale(path):
     """Check if cached file is older than 1 day"""
-    return (datetime.utcnow() - datetime.utcfromtimestamp(os.path.getmtime(path))).days > 0
+    if not os.path.exists(path):
+        return True
+    last_modified = datetime.utcfromtimestamp(os.path.getmtime(path))
+    return (datetime.utcnow() - last_modified).days > 0
 
 def fetch_csv(key, force=False):
-    """Fetch CSV data with caching and error handling"""
+    """
+    Fetch CSV for given dataset key, using cache unless stale or forced refresh.
+    Returns a pandas DataFrame.
+    """
     try:
         fname = FILES[key]
         fpath = os.path.join(CACHE_DIR, fname)
-        
-        if force or not os.path.exists(fpath) or _stale(fpath):
+        if force or _stale(fpath):
             fpath = _download(fname)
-        
         return pd.read_csv(fpath)
-    
     except Exception as e:
-        print(f"Error fetching {key}: {e}")
-        # Return empty DataFrame with expected columns as fallback
+        print(f"Error fetching '{key}': {e}")
+        # Return empty DataFrame with expected columns to avoid downstream crashes
         if key == "nameplate":
             return pd.DataFrame(columns=["FacilityName", "FacilityType", "NamePlateRating"])
         elif key == "mto_future":
@@ -60,79 +58,36 @@ def fetch_csv(key, force=False):
         else:
             return pd.DataFrame()
 
-# ---------- domain helpers ----------
 def clean_nameplate(df):
-    """Extract production facility nameplate ratings"""
+    """Return production facilities with facility name and nameplate rating as TJ_Nameplate"""
     if df.empty:
         return pd.DataFrame(columns=["FacilityName", "TJ_Nameplate"])
-    
-    keep = df[df["FacilityType"] == "Production"]
-    keep = keep[["FacilityName", "NamePlateRating"]]
-    return keep.rename(columns={"NamePlateRating": "TJ_Nameplate"})
+    prod = df[df["FacilityType"] == "Production"]
+    prod = prod[["FacilityName", "NamePlateRating"]].copy()
+    prod.rename(columns={"NamePlateRating": "TJ_Nameplate"}, inplace=True)
+    return prod
 
 def clean_mto(df):
-    """Extract medium-term capacity outlook for production facilities"""
+    """Return medium-term capacity outlook data for production facilities"""
     if df.empty:
         return pd.DataFrame(columns=["FacilityName", "GasDay", "TJ_Available"])
-    
     df["GasDay"] = pd.to_datetime(df["GasDay"])
     prod = df[df["FacilityType"] == "Production"]
-    prod = prod[["FacilityName", "GasDay", "Capacity"]]
-    return prod.rename(columns={"Capacity": "TJ_Available"})
+    prod = prod[["FacilityName", "GasDay", "Capacity"]].copy()
+    prod.rename(columns={"Capacity": "TJ_Available"}, inplace=True)
+    return prod
 
 def build_supply_profile():
-    """Build complete supply profile with nameplate and constraint data"""
-    try:
-        nameplate = clean_nameplate(fetch_csv("nameplate"))
-        mto = clean_mto(fetch_csv("mto_future"))
-        
-        if nameplate.empty or mto.empty:
-            print("Warning: Empty nameplate or MTO data")
-            return pd.DataFrame(columns=["FacilityName", "GasDay", "TJ_Available", "TJ_Nameplate"])
-        
-        supply = mto.merge(nameplate, on="FacilityName", how="left")
-        supply["TJ_Available"] = supply["TJ_Available"].fillna(supply["TJ_Nameplate"])
-        return supply
-    
-    except Exception as e:
-        print(f"Error building supply profile: {e}")
+    """Build supply profile by merging medium-term outlook with nameplate rating"""
+    nameplate = clean_nameplate(fetch_csv("nameplate"))
+    mto = clean_mto(fetch_csv("mto_future"))
+    if nameplate.empty or mto.empty:
+        print("Warning: Empty nameplate or medium-term capacity data")
         return pd.DataFrame(columns=["FacilityName", "GasDay", "TJ_Available", "TJ_Nameplate"])
+    supply = mto.merge(nameplate, on="FacilityName", how="left")
+    # Fill any missing available capacity with nameplate rating as fallback
+    supply["TJ_Available"] = supply["TJ_Available"].fillna(supply["TJ_Nameplate"])
+    return supply
 
 def build_demand_profile():
-    """Build demand profile from flow data"""
-    try:
-        flows = fetch_csv("flows")
-        
-        if flows.empty:
-            print("Warning: Empty flows data")
-            return pd.DataFrame(columns=["GasDay", "TJ_Demand"])
-        
-        flows["GasDay"] = pd.to_datetime(flows["GasDay"])
-        demand_z = flows[(flows["ZoneType"] == "Demand") & (flows["ZoneName"] == "Whole WA")]
-        demand = demand_z.groupby("GasDay")["Quantity"].sum().reset_index()
-        demand.rename(columns={"Quantity": "TJ_Demand"}, inplace=True)
-        return demand
-    
-    except Exception as e:
-        print(f"Error building demand profile: {e}")
-        return pd.DataFrame(columns=["GasDay", "TJ_Demand"])
-
-# ---------- master public call ----------
-def get_model():
-    """Get complete supply-demand model"""
-    try:
-        sup = build_supply_profile()
-        dem = build_demand_profile()
-        
-        if sup.empty or dem.empty:
-            print("Warning: Empty supply or demand data")
-            return pd.DataFrame(), pd.DataFrame()
-        
-        total_sup = sup.groupby("GasDay")["TJ_Available"].sum().reset_index()
-        model = dem.merge(total_sup, on="GasDay", how="left")
-        model["Shortfall"] = model["TJ_Available"] - model["TJ_Demand"]
-        return sup, model
-    
-    except Exception as e:
-        print(f"Error in get_model: {e}")
-        return pd.DataFrame(), pd.DataFrame()
+    """Build historical demand profile aggregated by GasDay for WA
